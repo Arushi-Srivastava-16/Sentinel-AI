@@ -1,0 +1,102 @@
+# =============================================================================
+# Sentinel AI — .gitignore
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Secrets and credentials — NEVER commit these
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# JWT signing keys
+certs/private.pem
+certs/public.pem
+
+# Gmail OAuth tokens and agent credentials
+secrets/gmail/credentials.json
+secrets/gmail/token.json
+secrets/gmail/sentinel_agent.json
+secrets/
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*$py.class
+
+# Virtual environments
+.venv*/
+venv/
+env/
+ENV/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+MANIFEST
+
+# Test artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+.pytype/
+
+# ---------------------------------------------------------------------------
+# Node / Dashboard
+# ---------------------------------------------------------------------------
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.env
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ---------------------------------------------------------------------------
+# Sentinel SDK — generated symlink (created by setup, not committed)
+# ---------------------------------------------------------------------------
+sentinel_sdk
+
+# ---------------------------------------------------------------------------
+# Docker
+# ---------------------------------------------------------------------------
+docker-compose.override.yml
+
+# ---------------------------------------------------------------------------
+# macOS
+# ---------------------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# ---------------------------------------------------------------------------
+# Editors and IDEs
+# ---------------------------------------------------------------------------
+.vscode/settings.json
+.vscode/*.code-workspace
+.idea/
+*.swp
+*.swo
+*~
+
+# ---------------------------------------------------------------------------
+# Logs
+# ---------------------------------------------------------------------------
+*.log
+logs/

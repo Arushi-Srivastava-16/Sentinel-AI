@@ -1,0 +1,165 @@
+# =============================================================================
+# Sentinel AI — Full Stack
+# Starts every service needed to run Sentinel locally or on a VPS.
+#
+# Quick start:
+#   cp .env.example .env          # fill in SENTINEL_ADMIN_KEY and OPENAI_API_KEY
+#   docker compose up -d
+#   # Pull the local judge model (one-time):
+#   docker exec sentinel-ollama ollama pull llama3.2:3b
+#
+# Service map:
+#   Gateway    →  http://localhost:8000      (REST API + WebSocket)
+#   Dashboard  →  http://localhost:3000      (React UI)
+#   Neo4j UI   →  http://localhost:7474      (audit graph browser)
+#   Ollama     →  http://localhost:11434     (local LLM judge, Tier 1)
+# =============================================================================
+
+services:
+  redis:
+    image: redis:7.2-alpine
+    container_name: sentinel-redis
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --save 60 1
+      --loglevel warning
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - sentinel
+
+  neo4j:
+    image: neo4j:5.18-community
+    container_name: sentinel-neo4j
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-sentinel_dev_password}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+      NEO4J_dbms_memory_heap_initial__size: 512m
+      NEO4J_dbms_memory_heap_max__size: 1G
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - ./database/schema.cypher:/var/lib/neo4j/import/schema.cypher
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "${NEO4J_PASSWORD:-sentinel_dev_password}", "RETURN 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - sentinel
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: sentinel-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: 5m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      - sentinel
+    # Uncomment for GPU support (requires nvidia-container-toolkit):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    container_name: sentinel-gateway
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      REDIS_HOST: redis
+      NEO4J_URI: bolt://neo4j:7687
+      OLLAMA_BASE_URL: http://ollama:11434
+    depends_on:
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - sentinel
+    restart: unless-stopped
+
+  audit-worker:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    container_name: sentinel-audit-worker
+    command: ["python", "-m", "database.stream_consumer"]
+    env_file:
+      - .env
+    environment:
+      REDIS_HOST: redis
+      NEO4J_URI: bolt://neo4j:7687
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks:
+      - sentinel
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: dashboard
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:8000
+        VITE_WS_URL: ws://localhost:8000/ws/dashboard
+        VITE_ADMIN_API_KEY: ${SENTINEL_ADMIN_KEY}
+    container_name: sentinel-dashboard
+    ports:
+      - "3000:80"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks:
+      - sentinel
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  neo4j_data:
+  neo4j_logs:
+  ollama_models:
+
+networks:
+  sentinel:
+    driver: bridge

@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sentinel-sdk"
+version = "0.1.0"
+description = "Python client SDK for the Sentinel AI Governance Gateway"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+keywords = ["ai", "governance", "policy", "agent", "safety"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "httpx>=0.27.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "respx>=0.21",      # httpx mock library
+]
+
+[project.urls]
+Homepage = "https://github.com/your-org/sentinel-ai"
+Repository = "https://github.com/your-org/sentinel-ai"
+"Bug Tracker" = "https://github.com/your-org/sentinel-ai/issues"
+
+[tool.hatch.build.targets.wheel]
+# The wheel contains the sentinel_sdk package.
+# Since the source directory is named sentinel-sdk (hyphen), we tell hatch
+# where to find the Python package root and remap it to sentinel_sdk (underscore).
+sources = ["."]
+include = ["__init__.py", "client.py"]
+
+[tool.hatch.build.targets.wheel.sources]
+"" = "sentinel_sdk"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

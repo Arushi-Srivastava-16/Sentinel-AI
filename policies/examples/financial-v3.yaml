@@ -1,0 +1,171 @@
+# =============================================================================
+# Sentinel Policy — Full Spectrum Governance v3.0.0
+# Supersedes: financial-v2 (2.0.0)
+# =============================================================================
+#
+# v3 additions over v2:
+#   - Payment governance: threshold (high-value → human review) +
+#     denylist (flagged recipients → blocked)
+#   - Prompt injection detection inherited from v2
+#
+# Rule coverage matrix:
+#   Tool                   | Rule Type  | Action
+#   -----------------------|------------|-------------------
+#   run_terminal_command   | regex      | block (secrets)
+#   run_terminal_command   | regex      | block (exfil)
+#   read_file              | regex      | block (secrets)
+#   gmail_send_email       | denylist   | block (bad recipients)
+#   gmail_send_email       | allowlist  | human_review (untrusted domain)
+#   gmail_send_email       | regex      | block (secrets in body)
+#   execute_payment        | denylist   | block (flagged recipients)
+#   execute_payment        | threshold  | human_review (amount > 10 000)
+#   * (all tools)          | denylist   | block (prompt injection)
+# =============================================================================
+
+id: financial-v1
+version: "3.0.0"
+policy_group: financial
+effective_from: "2026-04-01T00:00:00Z"
+effective_until: null
+parent_version: "2.0.0"
+description: >
+  Full-spectrum governance policy: terminal command safety, Gmail outbound
+  safety, payment amount thresholds, flagged-recipient blocking, and
+  prompt-injection detection.
+
+rate_limits:
+  tokens_per_minute: 60
+  bucket_size: 60
+  burst_multiplier: 1.0
+
+rules:
+  # ---------------------------------------------------------------------------
+  # Terminal command — secret file reads
+  # ---------------------------------------------------------------------------
+  - id: rule-terminal-secret-read-block
+    description: Block direct attempts to read local secret files via terminal.
+    severity: critical
+    type: regex
+    applies_to_tools: [run_terminal_command]
+    action: block
+    config:
+      argument_key: command
+      pattern: "(?i)(cat|type|more|Get-Content|gc)\\b.*(\\.env\\b|id_rsa\\b|\\.pem\\b|credentials\\.json\\b)"
+
+  # ---------------------------------------------------------------------------
+  # Terminal command — network exfiltration of secret files
+  # ---------------------------------------------------------------------------
+  - id: rule-terminal-secret-exfil-block
+    description: Block terminal commands that upload local secret files to external hosts.
+    severity: critical
+    type: regex
+    applies_to_tools: [run_terminal_command]
+    action: block
+    config:
+      argument_key: command
+      pattern: "(?i)(curl(\\.exe)?\\b.*(--data|--data-binary|--form).*@[\"']?[^\\s\"']*(\\.env|id_rsa|\\.pem|credentials\\.json)\\b)|(Invoke-WebRequest\\b.*(-InFile|--InFile)\\s+[\"']?[^\\s\"']*(\\.env|id_rsa|\\.pem|credentials\\.json)\\b)"
+
+  # ---------------------------------------------------------------------------
+  # File access — secret file paths
+  # ---------------------------------------------------------------------------
+  - id: rule-read-file-secret-block
+    description: Block read_file access to common sensitive local files.
+    severity: critical
+    type: regex
+    applies_to_tools: [read_file]
+    action: block
+    config:
+      argument_key: path
+      pattern: "(?i)(^|[\\\\/])\\.env(\\.|$)|id_rsa|\\.pem$|credentials\\.json$"
+
+  # ---------------------------------------------------------------------------
+  # Gmail — blocked recipients
+  # ---------------------------------------------------------------------------
+  - id: rule-gmail-recipient-denylist
+    description: Block outbound Gmail to risky or competitor recipient patterns.
+    severity: high
+    type: denylist
+    applies_to_tools: [gmail_send_email, gmail_create_draft]
+    action: block
+    config:
+      argument_key: to
+      match_mode: contains
+      patterns:
+        - "@malicious"
+        - "@competitor"
+        - "admin@"
+        - "root@"
+
+  # ---------------------------------------------------------------------------
+  # Gmail — untrusted domain requires human review
+  # ---------------------------------------------------------------------------
+  - id: rule-gmail-domain-review
+    description: Require human review before sending to recipients outside trusted domains.
+    severity: high
+    type: allowlist
+    applies_to_tools: [gmail_send_email, gmail_create_draft]
+    action: human_review
+    config:
+      argument_key: to_domain
+      patterns:
+        - "gmail.com"
+
+  # ---------------------------------------------------------------------------
+  # Gmail — secrets in body
+  # ---------------------------------------------------------------------------
+  - id: rule-gmail-secret-exfil-block
+    description: Block Gmail messages whose body contains API keys or credentials.
+    severity: critical
+    type: regex
+    applies_to_tools: [gmail_send_email, gmail_create_draft]
+    action: block
+    config:
+      argument_key: body
+      pattern: "(?i)(api[_-]?key\\s*[:=]|secret\\s*[:=]|password\\s*[:=]|BEGIN\\s+PRIVATE\\s+KEY|aws_access_key_id|authorization:\\s*bearer)"
+
+  # ---------------------------------------------------------------------------
+  # Payment — flagged recipients (fast block)
+  # ---------------------------------------------------------------------------
+  - id: rule-payment-blocked-recipient
+    description: Block payments to known-flagged or sanctioned recipient identifiers.
+    severity: critical
+    type: denylist
+    applies_to_tools: [execute_payment]
+    action: block
+    config:
+      argument_key: recipient
+      match_mode: contains
+      patterns:
+        - "fraud_"
+        - "sanctioned_"
+        - "test_exfil"
+
+  # ---------------------------------------------------------------------------
+  # Payment — high-value threshold requires human review
+  # ---------------------------------------------------------------------------
+  - id: rule-payment-high-value-review
+    description: Flag payments above $10,000 USD for human approval before execution.
+    severity: high
+    type: threshold
+    applies_to_tools: [execute_payment]
+    action: human_review
+    config:
+      argument_key: amount
+      max_value: 10000
+
+  # ---------------------------------------------------------------------------
+  # Prompt injection — applies to all tools via task_description
+  # Uses type: denylist so it is evaluated in pass 1 (before any regex
+  # catch-all cognitive_check rules can short-circuit the evaluation).
+  # ---------------------------------------------------------------------------
+  - id: rule-prompt-injection-block
+    description: Block requests whose task description contains prompt injection patterns.
+    severity: critical
+    type: denylist
+    applies_to_tools: []
+    action: block
+    config:
+      argument_key: "__context.task_description"
+      match_mode: regex
+      patterns:
+        - "(?i)(ignore\\b.*(rules|instructions|constraints|system prompt)|disregard\\b.*(rules|instructions)|jailbreak|DAN mode)"

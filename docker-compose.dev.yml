@@ -1,0 +1,145 @@
+version: "3.9"
+
+# =============================================================================
+# Sentinel — Development Infrastructure Only
+# Runs Neo4j, Redis, Ollama. No application services.
+# Use: make dev-up
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Redis — 4 logical databases:
+  #   DB0: rate limiting
+  #   DB1: audit write queue (Redis Streams)
+  #   DB2: WebSocket pub/sub fan-out
+  #   DB3: judge response cache
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7.2-alpine
+    container_name: sentinel-redis
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --save 60 1
+      --loglevel warning
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - sentinel
+
+  # ---------------------------------------------------------------------------
+  # Neo4j — Graph audit trail
+  # Dashboard UI: http://localhost:7474 (neo4j / sentinel_dev_password)
+  # ---------------------------------------------------------------------------
+  neo4j:
+    image: neo4j:5.18-community
+    container_name: sentinel-neo4j
+    ports:
+      - "7474:7474"   # Browser UI
+      - "7687:7687"   # Bolt protocol
+    environment:
+      NEO4J_AUTH: neo4j/sentinel_dev_password
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+      NEO4J_dbms_memory_heap_initial__size: 512m
+      NEO4J_dbms_memory_heap_max__size: 1G
+      NEO4J_dbms_memory_pagecache_size: 512m
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - ./database/migrations:/var/lib/neo4j/import/migrations:ro
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "sentinel_dev_password", "RETURN 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - sentinel
+
+  # ---------------------------------------------------------------------------
+  # Ollama — Local LLM inference (Judge Tier 1)
+  # After first start, pull the model:
+  #   docker exec sentinel-ollama ollama pull llama3.2:3b
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: sentinel-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: 5m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      - sentinel
+    # Uncomment for GPU support (requires nvidia-container-toolkit):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # ---------------------------------------------------------------------------
+  # Langfuse — LLM observability (self-hosted)
+  # UI: http://localhost:3001
+  # ---------------------------------------------------------------------------
+  langfuse:
+    image: langfuse/langfuse:2
+    container_name: sentinel-langfuse
+    ports:
+      - "3001:3000"
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
+      NEXTAUTH_SECRET: sentinel_langfuse_secret_changeme
+      NEXTAUTH_URL: http://localhost:3001
+      SALT: sentinel_salt_changeme
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+    networks:
+      - sentinel
+
+  langfuse-db:
+    image: postgres:16-alpine
+    container_name: sentinel-langfuse-db
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - sentinel
+
+volumes:
+  redis_data:
+  neo4j_data:
+  neo4j_logs:
+  ollama_models:
+  langfuse_db_data:
+
+networks:
+  sentinel:
+    driver: bridge

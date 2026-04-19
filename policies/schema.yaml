@@ -1,0 +1,194 @@
+# =============================================================================
+# Sentinel — Policy Document Schema (JSON Schema in YAML format)
+# Every policy YAML file must validate against this schema.
+# Validated by: policies/loader.py and a pre-commit hook.
+# =============================================================================
+
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: SentinelPolicy
+description: Schema for Sentinel policy version documents.
+type: object
+
+required:
+  - id
+  - version
+  - policy_group
+  - effective_from
+  - rules
+
+additionalProperties: false
+
+properties:
+  id:
+    type: string
+    description: Unique identifier. Convention: {policy_group}-v{major}.
+    pattern: "^[a-z0-9-]+-v[0-9]+$"
+    examples:
+      - financial-v1
+      - data-access-v3
+
+  version:
+    type: string
+    description: Semantic version (major.minor.patch).
+    pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    examples:
+      - "1.0.0"
+      - "3.1.0"
+
+  policy_group:
+    type: string
+    description: >
+      Logical grouping. Agents are assigned a policy_group at registration.
+      Only one version per policy_group can be active at a time.
+    enum:
+      - financial
+      - data-access
+      - code-execution
+      - communication
+      - infrastructure
+      - default
+
+  effective_from:
+    type: string
+    format: date-time
+    description: ISO 8601 datetime from which this version may be activated.
+
+  effective_until:
+    type: ["string", "null"]
+    format: date-time
+    description: Optional expiry. Null means no planned expiry.
+    default: null
+
+  parent_version:
+    type: ["string", "null"]
+    description: Semver of the policy this version supersedes.
+    default: null
+
+  description:
+    type: string
+    maxLength: 500
+
+  # ---------------------------------------------------------------------------
+  # Rate limiting defaults for agents in this policy group
+  # ---------------------------------------------------------------------------
+  rate_limits:
+    type: object
+    additionalProperties: false
+    properties:
+      tokens_per_minute:
+        type: integer
+        minimum: 1
+        maximum: 10000
+        default: 50
+      bucket_size:
+        type: integer
+        minimum: 1
+        maximum: 10000
+        default: 50
+      burst_multiplier:
+        type: number
+        minimum: 1.0
+        maximum: 10.0
+        default: 1.5
+
+  # ---------------------------------------------------------------------------
+  # Tool-level rules
+  # ---------------------------------------------------------------------------
+  rules:
+    type: array
+    minItems: 1
+    items:
+      $ref: "#/$defs/Rule"
+
+# =============================================================================
+# Rule sub-schema
+# =============================================================================
+$defs:
+  Rule:
+    type: object
+    required:
+      - id
+      - description
+      - type
+      - action
+    additionalProperties: false
+    properties:
+      id:
+        type: string
+        description: Unique within the policy document.
+        pattern: "^rule-[a-z0-9-]+$"
+        examples:
+          - rule-max-payment-amount
+          - rule-pii-denylist
+
+      description:
+        type: string
+        maxLength: 300
+
+      severity:
+        type: string
+        enum: [low, medium, high, critical]
+        default: medium
+
+      type:
+        type: string
+        description: Rule evaluation strategy.
+        enum:
+          - denylist         # Block if any argument matches a pattern
+          - allowlist        # Block unless argument matches a pattern
+          - schema           # Validate arguments against a JSON schema
+          - threshold        # Block if numeric argument exceeds limit
+          - regex            # Block if argument matches a regex pattern
+          - cognitive        # Route to LLM judge for evaluation
+          - rate_limit       # Override global rate limit for specific tools
+
+      # Which tool_names this rule applies to.
+      # Empty list = applies to ALL tools.
+      applies_to_tools:
+        type: array
+        items:
+          type: string
+        default: []
+
+      action:
+        type: string
+        enum: [block, allow, human_review, cognitive_check]
+        description: What to do when the rule matches.
+
+      # Rule-type-specific configuration
+      config:
+        $ref: "#/$defs/RuleConfig"
+
+  RuleConfig:
+    type: object
+    additionalProperties: true   # Each rule type uses different config keys
+    description: |
+      Type-specific configuration for the rule.
+
+      denylist:
+        patterns: list of strings matched against argument values
+        match_mode: exact | prefix | contains | regex
+
+      allowlist:
+        patterns: list of allowed values for a specific argument key
+        argument_key: which argument key to check
+
+      schema:
+        json_schema: inline JSON Schema for argument validation
+
+      threshold:
+        argument_key: which numeric argument to check
+        max_value: maximum allowed value
+        currency_argument: optional — if set, normalise to USD before checking
+
+      regex:
+        argument_key: which argument key to check
+        pattern: regex pattern (re2 syntax)
+
+      cognitive:
+        check_types: [faithfulness, intent]  # which judge checks to run
+        min_confidence: 0.75
+
+      rate_limit:
+        tokens_per_minute: integer
+        applies_to_tools: [tool_name, ...]

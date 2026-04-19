@@ -1,0 +1,35 @@
+# =============================================================================
+# Sentinel AI — Railway deployment configuration
+#
+# Deploy steps:
+#   1. Push this repo to GitHub (public or private)
+#   2. Go to https://railway.app → New Project → Deploy from GitHub repo
+#   3. Select this repository; Railway auto-detects this file
+#   4. Add the environment variables below in the Railway dashboard:
+#        SENTINEL_ADMIN_KEY   (generate: python3 -c "import secrets; print('snl_admin_'+secrets.token_hex(32))")
+#        OPENAI_API_KEY       (from platform.openai.com)
+#        NEO4J_PASSWORD       (set a strong password)
+#   5. Add a Redis add-on: Railway dashboard → New → Database → Redis
+#      Railway injects REDIS_URL automatically; the gateway reads REDIS_HOST/PORT from it.
+#   6. (Optional) Add a managed Neo4j or connect your own via NEO4J_URI env var.
+#
+# After deploy:
+#   Gateway:   https://<your-app>.up.railway.app
+#   Dashboard: deploy separately on Vercel/Netlify (see dashboard/README.md)
+# =============================================================================
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "gateway/Dockerfile"
+
+[deploy]
+startCommand = "uvicorn gateway.main:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+[[envs]]
+# Railway injects $PORT automatically; everything else comes from the dashboard.
+# The variables listed here are documentation — set real values in the Railway UI.
+name = "production"

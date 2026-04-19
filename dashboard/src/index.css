@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    @apply bg-sentinel-bg text-white font-mono;
+    font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-sentinel-bg;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-sentinel-border rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-sentinel-muted;
+  }
+}

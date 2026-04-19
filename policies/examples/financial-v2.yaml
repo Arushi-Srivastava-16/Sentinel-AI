@@ -1,0 +1,116 @@
+# =============================================================================
+# Sentinel Policy — Practical Command + Mail v2.0.0
+# Supersedes: financial-v1 (1.0.0)
+# =============================================================================
+
+id: financial-v1
+version: "2.0.0"
+policy_group: financial
+effective_from: "2026-03-01T00:00:00Z"
+effective_until: null
+parent_version: "1.0.0"
+description: >
+  Practical command and Gmail governance policy.
+  v2 tightens command exfiltration protections and adds broader prompt-injection blocking.
+
+rate_limits:
+  tokens_per_minute: 60
+  bucket_size: 60
+  burst_multiplier: 1.0
+
+rules:
+  - id: rule-terminal-secret-read-block
+    description: Block direct attempts to read local secret files.
+    severity: critical
+    type: regex
+    applies_to_tools: [run_terminal_command]
+    action: block
+    config:
+      argument_key: command
+      pattern: "(?i)(cat|type|more|Get-Content|gc)\\b.*(\\.env\\b|id_rsa\\b|\\.pem\\b|credentials\\.json\\b)"
+
+  - id: rule-read-file-secret-block
+    description: Block read_file access to common sensitive local files.
+    severity: critical
+    type: regex
+    applies_to_tools: [read_file]
+    action: block
+    config:
+      argument_key: path
+      pattern: "(?i)(^|[\\\\/])\\.env(\\.|$)|id_rsa|\\.pem$|credentials\\.json$"
+
+  - id: rule-terminal-secret-exfil-block
+    description: Block terminal exfiltration attempts for local secret files.
+    severity: critical
+    type: regex
+    applies_to_tools: [run_terminal_command]
+    action: block
+    config:
+      argument_key: command
+      pattern: "(?i)(curl(\\.exe)?\\b.*(--data|--data-binary|--form).*@[\"']?[^\\s\"']*(\\.env|id_rsa|\\.pem|credentials\\.json)\\b)|(Invoke-WebRequest\\b.*(-InFile|--InFile)\\s+[\"']?[^\\s\"']*(\\.env|id_rsa|\\.pem|credentials\\.json)\\b)"
+
+  - id: rule-terminal-command-cognitive-check
+    description: Analyze every terminal command through LLM cognitive checks.
+    severity: high
+    type: regex
+    applies_to_tools: [run_terminal_command]
+    action: cognitive_check
+    config:
+      argument_key: command
+      pattern: "(?s).+"
+
+  - id: rule-gmail-recipient-denylist
+    description: Block outbound Gmail to risky recipient patterns.
+    severity: high
+    type: denylist
+    applies_to_tools: [gmail_send_email, gmail_create_draft]
+    action: block
+    config:
+      argument_key: to
+      match_mode: contains
+      patterns:
+        - "@malicious"
+        - "@competitor"
+        - "admin@"
+        - "root@"
+
+  - id: rule-gmail-domain-review
+    description: Require human review for recipients outside trusted domains.
+    severity: high
+    type: allowlist
+    applies_to_tools: [gmail_send_email, gmail_create_draft]
+    action: human_review
+    config:
+      argument_key: to_domain
+      patterns:
+        - "gmail.com"
+
+  - id: rule-gmail-secret-exfil-block
+    description: Block obvious secrets in outbound body text.
+    severity: critical
+    type: regex
+    applies_to_tools: [gmail_send_email, gmail_create_draft]
+    action: block
+    config:
+      argument_key: body
+      pattern: "(?i)(api[_-]?key\\s*[:=]|secret\\s*[:=]|password\\s*[:=]|BEGIN\\s+PRIVATE\\s+KEY|aws_access_key_id|authorization:\\s*bearer)"
+
+  - id: rule-gmail-body-quality-cognitive
+    description: Route outbound Gmail content to LLM for contextual quality checks.
+    severity: medium
+    type: regex
+    applies_to_tools: [gmail_send_email, gmail_create_draft]
+    action: cognitive_check
+    config:
+      argument_key: body
+      pattern: "(?s).+"
+
+  - id: rule-prompt-injection-reasoning
+    description: Block prompt injection patterns in context task descriptions.
+    severity: critical
+    type: regex
+    applies_to_tools: []
+    action: block
+    config:
+      argument_key: "__context.task_description"
+      pattern: "(?i)(ignore (all |previous |prior )?(rules|instructions|constraints)|disregard|jailbreak|DAN mode)"
